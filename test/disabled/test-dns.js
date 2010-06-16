@@ -14,6 +14,10 @@ assert.throws(function () {
   dns.resolve('127.0.0.1', 'PTR');
 });
 
+dns.resolve('127.0.0.1', "PTR", function(e, a) {
+  sys.puts("Can resolve PTR");
+});
+
 
 var hosts = ['example.com',
              'example.org',
