@@ -512,7 +512,7 @@ const struct message requests[] =
   ,.request_path= ""
   ,.request_url= "home.netscape.com:443"
   ,.num_headers= 2
-  ,.upgrade=0
+  ,.upgrade=1
   ,.headers= { { "User-agent", "Mozilla/1.1N" }
              , { "Proxy-authorization", "basic aGVsbG86d29ybGQ=" }
              }
@@ -1588,7 +1588,7 @@ main (void)
     "HEAD",
     "POST",
     "PUT",
-    "CONNECT",
+    //"CONNECT", //CONNECT can't be tested like other methods, it's a tunnel
     "OPTIONS",
     "TRACE",
     "COPY",
