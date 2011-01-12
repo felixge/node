@@ -145,6 +145,9 @@
       };
     }
 
+    // We use this alias for the preprocessor that filters it out
+    var debug = Module._debug;
+
     // given a module name, and a list of paths to test, returns the first
     // matching file in the following precedence.
     //
@@ -227,16 +230,16 @@
         id = './' + id;
       }
 
-      Module._debug('RELATIVE: requested:' + request +
-                    ' set ID to: ' + id + ' from ' + parent.id);
+      debug('RELATIVE: requested:' + request +
+            ' set ID to: ' + id + ' from ' + parent.id);
 
       return [id, [path.dirname(parent.filename)]];
     }
 
 
     Module._load = function(request, parent) {
-      Module._debug('Module._load REQUEST  ' + (request) +
-                    ' parent: ' + parent.id);
+      debug('Module._load REQUEST  ' + (request) +
+            ' parent: ' + parent.id);
 
       var resolved = Module._resolveFilename(request, parent);
       var id = resolved[0];
@@ -258,7 +261,7 @@
           return replModule.exports;
         }
 
-        Module._debug('load native module ' + request);
+        debug('load native module ' + request);
         return Module._requireNative(id);
       }
 
@@ -278,8 +281,8 @@
       var paths = resolvedModule[1];
 
       // look up the filename first, since that's the cache key.
-      Module._debug('looking for ' + JSON.stringify(id) +
-                    ' in ' + JSON.stringify(paths));
+      debug('looking for ' + JSON.stringify(id) +
+            ' in ' + JSON.stringify(paths));
 
       var filename = Module._findPath(request, paths);
       if (!filename) {
@@ -291,8 +294,8 @@
 
 
     Module.prototype.load = function(filename) {
-      Module._debug('load ' + JSON.stringify(filename) +
-                    ' for module ' + JSON.stringify(this.id));
+      debug('load ' + JSON.stringify(filename) +
+            ' for module ' + JSON.stringify(this.id));
 
       process.assert(!this.loaded);
       this.filename = filename;
@@ -331,7 +334,7 @@
 
       if (Module._contextLoad) {
         if (self.id !== '.') {
-          Module._debug('load submodule');
+          debug('load submodule');
           // not root module
           var sandbox = {};
           for (var k in global) {
@@ -346,29 +349,28 @@
           sandbox.root = root;
 
           return runInNewContext(content, sandbox, filename, true);
-        } else {
-          Module._debug('load root module');
-          // root module
-          global.require = require;
-          global.exports = self.exports;
-          global.__filename = filename;
-          global.__dirname = dirname;
-          global.module = self;
-
-          return runInThisContext(content, filename, true);
         }
 
-      } else {
-        // create wrapper function
-        var wrapper = Module.wrap(content);
+        debug('load root module');
+        // root module
+        global.require = require;
+        global.exports = self.exports;
+        global.__filename = filename;
+        global.__dirname = dirname;
+        global.module = self;
 
-        var compiledWrapper = runInThisContext(wrapper, filename, true);
-        if (filename === process.argv[1] && global.v8debug) {
-          global.v8debug.Debug.setBreakPoint(compiledWrapper, 0, 0);
-        }
-        var args = [self.exports, require, self, filename, dirname];
-        return compiledWrapper.apply(self.exports, args);
+        return runInThisContext(content, filename, true);
       }
+
+      // create wrapper function
+      var wrapper = Module.wrap(content);
+
+      var compiledWrapper = runInThisContext(wrapper, filename, true);
+      if (filename === process.argv[1] && global.v8debug) {
+        global.v8debug.Debug.setBreakPoint(compiledWrapper, 0, 0);
+      }
+      var args = [self.exports, require, self, filename, dirname];
+      return compiledWrapper.apply(self.exports, args);
     };
 
     // Native extension for .js
