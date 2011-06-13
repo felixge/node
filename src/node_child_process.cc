@@ -297,6 +297,150 @@ void ChildProcess::Stop() {
 }
 
 
+static int spawn_sync_pipe[2];
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+void SyncCHLDHandler(int sig) {
+  assert(sig == SIGCHLD);
+  assert(spawn_sync_pipe[0] >= 0);
+  assert(spawn_sync_pipe[1] >= 0);
+  char c;
+  write(spawn_sync_pipe[1], &c, 1);
+}
+
+
+static int ExecSync(const char* cmd,
+                    char* buf,
+                    int buflen, /* in */
+                    int* nread, /* out */
+                    int64_t timeout /* ms */) {
+  *nread = 0;
+  int out_pipe[2];
+
+  if (pipe(out_pipe)) {
+    perror("pipe");
+    return -1;
+  }
+
+  pid_t pid;
+
+  switch (pid = fork()) {
+    case -1:
+      perror("fork");
+      return -1;
+
+    case 0: // child
+      close(out_pipe[0]);  // close read end
+      dup2(out_pipe[1], STDOUT_FILENO);
+      dup2(out_pipe[1], STDERR_FILENO);
+
+      const char* args[3] = { "-c", cmd, NULL };
+
+      execvp("/bin/sh", (char* const*)args);
+      perror("execvp()");
+      _exit(127);
+      break;
+  }
+
+  // parent
+  close(out_pipe[1]); // close the write end of the pipe.
+
+
+  int nfds = MAX(out_pipe[0], spawn_sync_pipe[0]) + 1;
+  int64_t start_time = uv_now(); /* time in ms */
+
+  /* Set up sighandling */
+  struct sigaction siga;
+  static sigset_t sigset;
+  sigfillset(&sigset);
+  siga.sa_handler = SyncCHLDHandler;
+  siga.sa_mask = sigset;
+  siga.sa_flags = 0;
+  if (sigaction(SIGCHLD, &siga, (struct sigaction *)NULL) != 0) {
+    perror("sigaction");
+    goto error;
+  }
+
+  fd_set pipes;
+
+  struct timeval select_timeout;
+
+  while (true) {
+    FD_ZERO(&pipes);
+    FD_SET(out_pipe[0], &pipes);
+    FD_SET(spawn_sync_pipe[0], &pipes);
+
+    int64_t elapsed = uv_now() - start_time;
+    int64_t time_to_timeout = timeout - elapsed;
+    select_timeout.tv_sec = time_to_timeout / 1000;
+    select_timeout.tv_usec = time_to_timeout % 1000;
+
+    int r = select(nfds, &pipes, NULL, &pipes, &select_timeout);
+
+    if (r == -1) {
+      /* error */
+      perror("select");
+      goto error;
+      return -1;
+    }
+
+    if (r == 0) {
+      /* timeout */
+      close(spawn_sync_pipe[0]);
+      close(spawn_sync_pipe[1]);
+      close(out_pipe[0]);
+      kill(pid, SIGKILL);
+      return -1;
+    }
+
+    if (FD_ISSET(out_pipe[0], &pipes)) {
+      // Check for buffer overflow.
+      if (buflen - *nread <= 0) goto error;
+      r = read(out_pipe[0], buf + *nread, buflen - *nread);
+      if (r) goto error;
+    }
+
+    if (FD_ISSET(spawn_sync_pipe[0], &pipes)) {
+      // The child process has exited.
+      int status;
+
+      pid_t p = wait(&status);
+      if (p < 0) { 
+        perror("wait");
+        goto error;
+      }
+
+      close(spawn_sync_pipe[0]);
+      close(spawn_sync_pipe[1]);
+      close(out_pipe[0]);
+
+      return status;
+    }
+
+    uv_update_time();
+  }
+
+error: 
+  close(spawn_sync_pipe[0]);
+  close(spawn_sync_pipe[1]);
+  close(out_pipe[0]);
+  kill(pid, SIGKILL);
+  return -1;
+}
+
+static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
+  HandleScope scope;
+
+  // args stuff
+
+  ExecSync();
+
+  return scope.Close(Integer::New(status));
+}
+
+
+
 // Note that args[0] must be the same as the "file" param.  This is an
 // execvp() requirement.
 //
