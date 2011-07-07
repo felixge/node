@@ -20,6 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <node_child_process.h>
+#include <node_buffer.h>
 #include <node.h>
 
 #include <assert.h>
@@ -46,6 +47,16 @@ extern char **environ;
 # endif
 
 #include <limits.h> /* PATH_MAX */
+
+struct exec_sync {
+  const char *cmd;
+  int exit_code;
+  int signal;
+  int buflen;
+  char buf*;
+  int nread;
+  int64_t timeout;
+};
 
 namespace node {
 
@@ -101,6 +112,7 @@ void ChildProcess::Initialize(Handle<Object> target) {
   NODE_SET_PROTOTYPE_METHOD(t, "kill", ChildProcess::Kill);
 
   target->Set(String::NewSymbol("ChildProcess"), t->GetFunction());
+  NODE_SET_METHOD(target, "execSync", ExecSync);
 }
 
 
@@ -302,6 +314,7 @@ static int spawn_sync_pipe[2];
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 void SyncCHLDHandler(int sig) {
+  printf("CHLD\n");
   assert(sig == SIGCHLD);
   assert(spawn_sync_pipe[0] >= 0);
   assert(spawn_sync_pipe[1] >= 0);
@@ -310,15 +323,16 @@ void SyncCHLDHandler(int sig) {
 }
 
 
-static int ExecSync(const char* cmd,
-                    char* buf,
-                    int buflen, /* in */
-                    int* nread, /* out */
-                    int64_t timeout /* ms */) {
-  *nread = 0;
+static int ExecSync(struct exec_sync* exec) {
+  exec->nread = 0;
   int out_pipe[2];
 
   if (pipe(out_pipe)) {
+    perror("pipe");
+    return -1;
+  }
+
+  if (pipe(spawn_sync_pipe)) {
     perror("pipe");
     return -1;
   }
@@ -335,9 +349,9 @@ static int ExecSync(const char* cmd,
       dup2(out_pipe[1], STDOUT_FILENO);
       dup2(out_pipe[1], STDERR_FILENO);
 
-      const char* args[3] = { "-c", cmd, NULL };
+      const char* args[4] = { "/bin/sh", "-c", exec->cmd, NULL };
 
-      execvp("/bin/sh", (char* const*)args);
+      execvp(args[0], (char* const*)args);
       perror("execvp()");
       _exit(127);
       break;
@@ -345,7 +359,6 @@ static int ExecSync(const char* cmd,
 
   // parent
   close(out_pipe[1]); // close the write end of the pipe.
-
 
   int nfds = MAX(out_pipe[0], spawn_sync_pipe[0]) + 1;
   int64_t start_time = uv_now(); /* time in ms */
@@ -372,20 +385,24 @@ static int ExecSync(const char* cmd,
     FD_SET(spawn_sync_pipe[0], &pipes);
 
     int64_t elapsed = uv_now() - start_time;
-    int64_t time_to_timeout = timeout - elapsed;
+    int64_t time_to_timeout = exec->timeout - elapsed;
+
     select_timeout.tv_sec = time_to_timeout / 1000;
     select_timeout.tv_usec = time_to_timeout % 1000;
 
-    int r = select(nfds, &pipes, NULL, &pipes, &select_timeout);
+    int r = select(nfds, &pipes, NULL, NULL, &select_timeout);
 
     if (r == -1) {
-      /* error */
+      if (errno == EINTR) {
+        continue;
+      }
+
       perror("select");
       goto error;
-      return -1;
     }
 
     if (r == 0) {
+      fprintf(stderr, "timeout\n");
       /* timeout */
       close(spawn_sync_pipe[0]);
       close(spawn_sync_pipe[1]);
@@ -395,18 +412,22 @@ static int ExecSync(const char* cmd,
     }
 
     if (FD_ISSET(out_pipe[0], &pipes)) {
+      printf("Out pipe\n");
       // Check for buffer overflow.
-      if (buflen - *nread <= 0) goto error;
-      r = read(out_pipe[0], buf + *nread, buflen - *nread);
-      if (r) goto error;
+      if (exec->buflen - exec->nread <= 0) goto error;
+      r = read(out_pipe[0], exec->buf + exec->nread, exec->buflen - exec->nread);
+      if (r == -1) goto error;
+
+      exec->nread += r;
     }
 
     if (FD_ISSET(spawn_sync_pipe[0], &pipes)) {
+      printf("Sync pipe\n");
       // The child process has exited.
       int status;
 
       pid_t p = wait(&status);
-      if (p < 0) { 
+      if (p < 0) {
         perror("wait");
         goto error;
       }
@@ -415,13 +436,22 @@ static int ExecSync(const char* cmd,
       close(spawn_sync_pipe[1]);
       close(out_pipe[0]);
 
-      return status;
+      if (WIFEXITED(status)) {
+        fprintf(stderr, "out: %s\n", exec->buf);
+        fprintf(stderr, "Normal exit\n");
+      }
+
+      if (WIFSIGNALED(status)) {
+        fprintf(stderr, "Signal exit\n");
+      }
+
+      return WEXITSTATUS(status);
     }
 
     uv_update_time();
   }
 
-error: 
+error:
   close(spawn_sync_pipe[0]);
   close(spawn_sync_pipe[1]);
   close(out_pipe[0]);
@@ -432,11 +462,28 @@ error:
 static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
   HandleScope scope;
 
-  // args stuff
+  if (!Buffer::HasInstance(args[0])) {
+    return ThrowException(Exception::TypeError(
+          String::New("First argument should be a buffer")));
+  }
 
-  ExecSync();
+  struct exec_sync exec;
+  exec.cmd = "echo hello";
+  exec.buflen = 8 * 1024;
+  exec.timeout = 1000;
 
-  return scope.Close(Integer::New(status));
+  Local<Object> buffer_obj = args[1]->ToObject();
+  exec.buf = &Buffer::Data(buffer_obj);
+  //size_t buffer_length = Buffer::Length(buffer_obj);
+
+  int exit_code = ExecSync(&exec);
+
+  Local<Object> r = Object::New();
+  r->Set(String::New("exitCode"), Integer::New(exit_code));
+  r->Set(String::New("nread"), Integer::New(exec.nread));
+  r->Set(String::New("buf"), String::New(exec.buf, exec.nread));
+
+  return scope.Close(r);
 }
 
 

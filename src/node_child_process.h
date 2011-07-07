@@ -47,6 +47,8 @@
 
 namespace node {
 
+static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args);
+
 class ChildProcess : ObjectWrap {
  public:
   static void Initialize(v8::Handle<v8::Object> target);
@@ -148,6 +150,5 @@ class ChildProcess : ObjectWrap {
   HANDLE process_handle_;
 #endif // __MINGW32__
 };
-
 }  // namespace node
 #endif  // NODE_CHILD_PROCESS_H_
