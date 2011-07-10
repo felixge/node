@@ -50,11 +50,11 @@ extern char **environ;
 
 struct exec_sync {
   const char *cmd;
-  int exit_code;
-  int signal;
-  int buflen;
-  char buf*;
-  int nread;
+  unsigned char exit_code;
+  unsigned char signal;
+  size_t buflen;
+  char *buf;
+  size_t nread;
   int64_t timeout;
 };
 
@@ -314,7 +314,6 @@ static int spawn_sync_pipe[2];
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 void SyncCHLDHandler(int sig) {
-  printf("CHLD\n");
   assert(sig == SIGCHLD);
   assert(spawn_sync_pipe[0] >= 0);
   assert(spawn_sync_pipe[1] >= 0);
@@ -402,7 +401,6 @@ static int ExecSync(struct exec_sync* exec) {
     }
 
     if (r == 0) {
-      fprintf(stderr, "timeout\n");
       /* timeout */
       close(spawn_sync_pipe[0]);
       close(spawn_sync_pipe[1]);
@@ -412,7 +410,6 @@ static int ExecSync(struct exec_sync* exec) {
     }
 
     if (FD_ISSET(out_pipe[0], &pipes)) {
-      printf("Out pipe\n");
       // Check for buffer overflow.
       if (exec->buflen - exec->nread <= 0) goto error;
       r = read(out_pipe[0], exec->buf + exec->nread, exec->buflen - exec->nread);
@@ -422,7 +419,6 @@ static int ExecSync(struct exec_sync* exec) {
     }
 
     if (FD_ISSET(spawn_sync_pipe[0], &pipes)) {
-      printf("Sync pipe\n");
       // The child process has exited.
       int status;
 
@@ -437,15 +433,14 @@ static int ExecSync(struct exec_sync* exec) {
       close(out_pipe[0]);
 
       if (WIFEXITED(status)) {
-        fprintf(stderr, "out: %s\n", exec->buf);
-        fprintf(stderr, "Normal exit\n");
+        exec->exit_code = WEXITSTATUS(status);
       }
 
       if (WIFSIGNALED(status)) {
-        fprintf(stderr, "Signal exit\n");
+        exec->signal = WTERMSIG(status);
       }
 
-      return WEXITSTATUS(status);
+      return 0;
     }
 
     uv_update_time();
@@ -462,26 +457,34 @@ error:
 static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
   HandleScope scope;
 
-  if (!Buffer::HasInstance(args[0])) {
-    return ThrowException(Exception::TypeError(
-          String::New("First argument should be a buffer")));
+  if (args.Length() < 2 ||
+      !args[0]->IsString() ||
+      !Buffer::HasInstance(args[1]) ) {
+    return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
 
   struct exec_sync exec;
-  exec.cmd = "echo hello";
-  exec.buflen = 8 * 1024;
   exec.timeout = 1000;
+  exec.signal = 0;
+
+  String::Utf8Value cmd(args[0]->ToString());
+  exec.cmd = strdup(*cmd);
 
   Local<Object> buffer_obj = args[1]->ToObject();
-  exec.buf = &Buffer::Data(buffer_obj);
-  //size_t buffer_length = Buffer::Length(buffer_obj);
+  exec.buf = Buffer::Data(buffer_obj);
+  exec.buflen = Buffer::Length(buffer_obj);
 
   int exit_code = ExecSync(&exec);
 
   Local<Object> r = Object::New();
-  r->Set(String::New("exitCode"), Integer::New(exit_code));
-  r->Set(String::New("nread"), Integer::New(exec.nread));
-  r->Set(String::New("buf"), String::New(exec.buf, exec.nread));
+  r->Set(String::New("exitCode"), Integer::New(exec.exit_code));
+
+  if (exec.signal) {
+    r->Set(String::New("signal"), String::NewSymbol(signo_string(exec.signal)));
+  } else {
+    r->Set(String::New("signal"), String::NewSymbol(""));
+  }
+  r->Set(String::New("bytesRead"), Integer::New(exec.nread));
 
   return scope.Close(r);
 }

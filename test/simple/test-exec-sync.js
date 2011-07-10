@@ -23,6 +23,29 @@ var common = require('../common');
 var execSync = require('child_process').execSync;
 var assert = require('assert');
 
-var hello = execSync('echo hello');
-console.error(hello);
-assert.strictEqual(hello, 'hello\n');
+(function testEchoHello() {
+  var hello = execSync('echo hello');
+  assert.strictEqual(hello, 'hello\n');
+})();
+
+(function testExceptionIfExitCodeGreaterZero() {
+  var caught;
+  try {
+    execSync('non-existing-command');
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.equal(caught.exitCode, 127);
+})();
+
+(function testExceptionOnSignalKill() {
+  var caught;
+  try {
+    execSync('kill -9 $$');
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.equal(caught.signal, 'SIGTERM');
+})();
