@@ -35,7 +35,7 @@ function httpreq(count) {
   if ( 1 < count ) return
 
   var req = http.request({
-    host:'not-a-real-domain-name.nobody-would-register-this-as-a-tld',
+    host:'not-a-real-domain-name.nobody-would-register-this-as-a-tld.local',
     port: 80,
     path: '/',
     method: 'GET'
@@ -45,7 +45,7 @@ function httpreq(count) {
 
   req.on('error', function(e){
     console.log(e.message);
-    assert.strictEqual(e.code, 'ENOTFOUND');
+    assert.ok(e.code === 'ENOTFOUND' || e.code === 'ENOEXEC');
     hadError++
     httpreq(count + 1)
   })
