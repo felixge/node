@@ -36,6 +36,7 @@ using v8::ThrowException;
 using v8::TryCatch;
 using v8::String;
 using v8::Exception;
+using v8::Message;
 using v8::Local;
 using v8::Array;
 using v8::Persistent;
@@ -366,7 +367,18 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args) {
                                          : Script::New(code, filename);
     if (script.IsEmpty()) {
       // FIXME UGLY HACK TO DISPLAY SYNTAX ERRORS.
+      // @TODO, REMOVE IF PATCH BELOW IS ACCEPTED
       if (display_error) DisplayExceptionLine(try_catch);
+
+      Handle<Message> message = try_catch.Message();
+
+      if (!message.IsEmpty()) {
+        Local<Object> err = try_catch.Exception()->ToObject();
+        err->Set(String::New("filename"), filename);
+        err->Set(String::New("line"), Integer::New(message->GetLineNumber()));
+        err->Set(String::New("startColumn"), Integer::New(message->GetStartColumn()));
+        err->Set(String::New("endColumn"), Integer::New(message->GetEndColumn()));
+      }
 
       // Hack because I can't get a proper stacktrace on SyntaxError
       return try_catch.ReThrow();
