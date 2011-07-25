@@ -25,27 +25,15 @@ var assert = require('assert');
 
 (function testEchoHello() {
   var hello = execSync('echo hello');
-  assert.strictEqual(hello, 'hello\n');
+  assert.strictEqual(hello.output, 'hello\n');
 })();
 
 (function testExceptionIfExitCodeGreaterZero() {
-  var caught;
-  try {
-    execSync('non-existing-command');
-  } catch (err) {
-    caught = err;
-  }
-
-  assert.equal(caught.exitCode, 127);
+  var nonExisting = execSync('non-existing-command');
+  assert.equal(nonExisting.code, 127);
 })();
 
 (function testExceptionOnSignalKill() {
-  var caught;
-  try {
-    execSync('kill -9 $$');
-  } catch (err) {
-    caught = err;
-  }
-
-  assert.equal(caught.signal, 'SIGTERM');
+  var kill = execSync('kill -9 $$');
+  assert.equal(kill.signal, 'SIGKILL');
 })();
