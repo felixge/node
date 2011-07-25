@@ -23,17 +23,28 @@ var common = require('../common');
 var execSync = require('child_process').execSync;
 var assert = require('assert');
 
+function execFixtureSync(script) {
+  var cmd = [process.execPath, common.fixturesDir + '/' + script]
+    .concat(Array.prototype.slice.call(arguments, 1))
+    .join(' ');
+
+  return execSync(cmd);
+}
+
 (function testEchoHello() {
-  var hello = execSync('echo hello');
-  assert.strictEqual(hello.output, 'hello\n');
+  var exec = execFixtureSync('echo.js');
+  assert.strictEqual(exec.output, 'hello world\r\n');
+  assert.equal(exec.signal, '');
+  assert.equal(exec.code, 0);
 })();
 
-(function testExceptionIfExitCodeGreaterZero() {
-  var nonExisting = execSync('non-existing-command');
-  assert.equal(nonExisting.code, 127);
+(function testExitCode() {
+  var exec = execFixtureSync('exit.js', 2);
+  assert.equal(exec.code, 2);
 })();
 
-(function testExceptionOnSignalKill() {
-  var kill = execSync('kill -9 $$');
-  assert.equal(kill.signal, 'SIGKILL');
+(function testExitSignal() {
+  var exec = execFixtureSync('signal.js', 'SIGKILL');
+  assert.equal(exec.signal, 'SIGKILL');
+  assert.strictEqual(exit.code, null);
 })();

@@ -406,14 +406,21 @@ static int ExecSync(struct exec_sync* exec) {
       close(spawn_sync_pipe[1]);
       close(out_pipe[0]);
       kill(pid, SIGKILL);
+      perror("timeout");
       return -1;
     }
 
     if (FD_ISSET(out_pipe[0], &pipes)) {
       // Check for buffer overflow.
-      if (exec->buflen - exec->nread <= 0) goto error;
+      if (exec->buflen - exec->nread <= 0) {
+        perror("buffer overflow");
+        goto error;
+      }
       r = read(out_pipe[0], exec->buf + exec->nread, exec->buflen - exec->nread);
-      if (r == -1) goto error;
+      if (r == -1) {
+        perror("read");
+        goto error;
+      }
 
       exec->nread += r;
     }
@@ -466,6 +473,7 @@ static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
   struct exec_sync exec;
   exec.timeout = 1000;
   exec.signal = 0;
+  exec.exit_code = 0;
 
   String::Utf8Value cmd(args[0]->ToString());
   exec.cmd = strdup(*cmd);
@@ -474,7 +482,8 @@ static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
   exec.buf = Buffer::Data(buffer_obj);
   exec.buflen = Buffer::Length(buffer_obj);
 
-  int exit_code = ExecSync(&exec);
+  // TODO, handle -1 errors
+  ExecSync(&exec);
 
   Local<Object> r = Object::New();
   r->Set(String::New("code"), Integer::New(exec.exit_code));
