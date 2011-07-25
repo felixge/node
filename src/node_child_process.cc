@@ -486,12 +486,13 @@ static v8::Handle<v8::Value> ExecSync(const v8::Arguments& args) {
   ExecSync(&exec);
 
   Local<Object> r = Object::New();
-  r->Set(String::New("code"), Integer::New(exec.exit_code));
 
   if (exec.signal) {
     r->Set(String::New("signal"), String::NewSymbol(signo_string(exec.signal)));
+    r->Set(String::New("code"), Null());
   } else {
     r->Set(String::New("signal"), String::NewSymbol(""));
+    r->Set(String::New("code"), Integer::New(exec.exit_code));
   }
   r->Set(String::New("bytesRead"), Integer::New(exec.nread));
 

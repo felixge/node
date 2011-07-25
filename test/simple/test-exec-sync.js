@@ -46,5 +46,5 @@ function execFixtureSync(script) {
 (function testExitSignal() {
   var exec = execFixtureSync('signal.js', 'SIGKILL');
   assert.equal(exec.signal, 'SIGKILL');
-  assert.strictEqual(exit.code, null);
+  assert.strictEqual(exec.code, null);
 })();
