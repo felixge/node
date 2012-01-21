@@ -71,6 +71,7 @@ class ProcessWrap : public HandleWrap {
 
     NODE_SET_PROTOTYPE_METHOD(constructor, "spawn", Spawn);
     NODE_SET_PROTOTYPE_METHOD(constructor, "kill", Kill);
+    NODE_SET_PROTOTYPE_METHOD(constructor, "runSync", RunSync);
 
     target->Set(String::NewSymbol("Process"), constructor->GetFunction());
   }
@@ -105,6 +106,18 @@ class ProcessWrap : public HandleWrap {
     options.exit_cb = OnExit;
 
     // TODO is this possible to do without mallocing ?
+
+    uv_loop_t* loop;
+
+    // options.sync
+    Local<Value> sync_v = js_options->Get(String::New("sync"));
+    if (!sync_v.IsEmpty() && sync_v->IsBoolean()) {
+      if (sync_v->IsTrue()) {
+        loop = uv_loop_new();
+      } else {
+        loop = Loop();
+      }
+    }
 
     // options.file
     Local<Value> file_v = js_options->Get(String::New("file"));
@@ -176,10 +189,10 @@ class ProcessWrap : public HandleWrap {
         Get(String::NewSymbol("windowsVerbatimArguments"))->IsTrue();
 #endif
 
-    int r = uv_spawn(Loop(), &wrap->process_, options);
+    int r = uv_spawn(loop, &wrap->process_, options);
 
     if (r) {
-      SetErrno(uv_last_error(Loop()));
+      SetErrno(uv_last_error(loop));
     }
     else {
       wrap->SetHandle((uv_handle_t*)&wrap->process_);
@@ -215,6 +228,17 @@ class ProcessWrap : public HandleWrap {
     if (r) SetErrno(uv_last_error(Loop()));
 
     return scope.Close(Integer::New(r));
+  }
+
+  static Handle<Value> RunSync(const Arguments& args) {
+    HandleScope scope;
+
+    UNWRAP
+
+    // TODO: Figure out how to run new uv loop in here, while blocking the
+    // main loop.
+
+    return scope.Close(Integer::New(0));
   }
 
   static void OnExit(uv_process_t* handle, int exit_status, int term_signal) {
